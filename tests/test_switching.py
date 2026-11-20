@@ -1,6 +1,8 @@
 import json
+from fractions import Fraction
 
 from archive.retrieval import read_artifact
+from calibration.certificate import decode_certificate
 from measurements.freeze import freeze_revision
 from switching.report import publish_switch_report
 from tests import LabCase
@@ -47,6 +49,23 @@ class SwitchingTests(LabCase):
         self.stop_source()
         report = publish_switch_report(self.archive, issued.artifact_id, 1, 2)
         self.assertEqual(report.pairs, ((2, 2), (2, 3), (3, 3)))
+
+    def test_joint_curve_rejects_projection_only_pairs(self):
+        # Marginally the middle level may sit anywhere in [0, 2], but every
+        # optimal curve has the form (t, t, 2) with t < 2. Pairs such as
+        # (2, 2) would need an optimal curve with the middle level at 2 while
+        # the first stays below 1, which no single curve realises.
+        rule = self.rule(levels=('A', 'B', 'C'))
+        issued = self.issue(self.seed('ridge', rule, [('A', 2, 2), ('B', 0, 2), ('C', 2, 2)]))
+        certificate = decode_certificate(issued.payload)
+        self.assertEqual(certificate.bounds.intervals,
+                         ((Fraction(0), Fraction(2)), (Fraction(0), Fraction(2)), (Fraction(2), Fraction(2))))
+        self.assertTrue(certificate.contains_curve((0, 0, 2)))
+        self.assertTrue(certificate.contains_curve((2, 2, 2)))
+        self.assertFalse(certificate.contains_curve((0, 2, 2)))
+        self.stop_source()
+        report = publish_switch_report(self.archive, issued.artifact_id, 1, 2)
+        self.assertEqual(report.pairs, ((1, 1), (1, 3), (3, 3)))
 
     def test_thresholds_outside_domain(self):
         issued = self.issue(self.seed('outside', self.rule(), [('L', 2, 2), ('H', 0, 2)]))

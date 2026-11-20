@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from fractions import Fraction
 from itertools import combinations_with_replacement
@@ -74,6 +75,23 @@ class CalibrationTests(LabCase):
         self.assertEqual(certificate.bounds.intervals, tuple((min(col), max(col)) for col in zip(*optimal)))
         for curve, loss in loss_by_curve.items():
             self.assertEqual(certificate.contains_curve(curve), loss == minimum, curve)
+
+    def test_certificate_rejects_tampered_loss_evidence(self):
+        frozen = self.seed('joined', self.rule(), [('L', 2, 2), ('H', 0, 2)])
+        payload = self.issue(frozen).payload
+        certificate = decode_certificate(payload)
+        self.assertFalse(certificate.contains_curve((1, 2)))
+        self.assertFalse(certificate.contains_curve((3, 3)))
+        forged = json.loads(json.dumps(payload))
+        # Dropping the troublesome evidence must not silently widen the set.
+        forged['evidence']['profiles'] = [[['0', 1]], [['0', 1]]]
+        with self.assertRaisesRegex(ValueError, 'minimum loss'):
+            decode_certificate(forged)
+        forged = json.loads(json.dumps(payload))
+        forged['minimum_loss'] = '0'
+        forged['evidence']['profiles'] = []
+        with self.assertRaises(ValueError):
+            decode_certificate(forged)
 
     def test_invalid_frozen_source_publishes_nothing(self):
         frozen = self.seed('damaged', self.rule(), [('L', 0, 1), ('H', 2, 1)])

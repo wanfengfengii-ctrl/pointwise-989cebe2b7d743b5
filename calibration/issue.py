@@ -13,5 +13,5 @@ def issue_calibration(repo: MeasurementRepository, archive, frozen_id: int) -> P
     profiles = build_loss_profiles(batch.rule.levels, batch.readings)
     fit = minimize_loss(profiles, batch.rule.lower, batch.rule.upper)
     bounds = project_optimal_bounds(fit)
-    certificate = build_certificate(batch, fit, bounds)
+    certificate = build_certificate(batch, fit, bounds, profiles)
     return publish_artifact(archive, CALIBRATION, certificate.to_payload(), frozen_id=batch.frozen_id)

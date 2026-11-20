@@ -65,3 +65,56 @@ def minimize_loss(profiles: tuple[LossProfile, ...], lower, upper) -> FitResult:
     tables = _cost_tables(profiles, lower_value, upper_value)
     minimum = min(tables.prefix[-1])
     return FitResult(minimum, _representative(tables, minimum), tables)
+
+
+def restricted_minimum_loss(profiles: tuple[LossProfile, ...], lower, upper,
+                            floors, caps) -> Fraction | None:
+    """Cheapest monotone in-domain curve obeying inclusive floors and strict caps.
+
+    Returns ``None`` when no curve satisfies the per-level constraints. The
+    grid is enriched with every floor and cap so that an affine cell is never
+    cut inside; a strict cap therefore admits only grid values strictly below
+    it, which is exactly the open boundary the caller asked for.
+    """
+    lower_value = parse_rational(lower)
+    upper_value = parse_rational(upper)
+    if (not profiles or lower_value > upper_value
+            or len(floors) != len(profiles) or len(caps) != len(profiles)):
+        raise ValueError('restricted fit requires ordered profiles and matching constraints')
+    nodes = {lower_value, upper_value}
+    for profile in profiles:
+        nodes.update(point for point in profile.breakpoints() if lower_value < point < upper_value)
+    for bound in (*floors, *caps):
+        if bound is not None and lower_value < bound < upper_value:
+            nodes.add(bound)
+    grid = tuple(sorted(nodes))
+    allowed = []
+    for floor, cap in zip(floors, caps):
+        allowed.append(tuple(
+            (floor is None or value >= floor) and (cap is None or value < cap)
+            for value in grid
+        ))
+    costs = None
+    for profile, mask in zip(profiles, allowed):
+        local = profile.values_on(grid)
+        if costs is None:
+            costs = [cost if permit else None for cost, permit in zip(local, mask)]
+            continue
+        updated = []
+        best = None
+        for cost, permit, previous in zip(local, mask, costs):
+            # ``previous`` is the cheapest prefix ending at or before this
+            # grid point, so the nondecreasing order is enforced here.
+            best = _cheaper(best, previous)
+            updated.append(None if not permit or best is None else best + cost)
+        costs = updated
+    feasible = [cost for cost in costs if cost is not None]
+    return min(feasible) if feasible else None
+
+
+def _cheaper(left: Fraction | None, right: Fraction | None) -> Fraction | None:
+    if left is None:
+        return right
+    if right is None:
+        return left
+    return min(left, right)
